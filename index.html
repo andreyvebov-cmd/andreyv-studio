@@ -341,11 +341,14 @@
 
         // Handle video end
         videoElement.addEventListener('ended', () => {
+            if (exportInProgress) {
+                if (mediaRecorder && mediaRecorder.state === 'recording') {
+                    mediaRecorder.stop();
+                }
+                return;
+            }
             pauseVideo();
             videoElement.currentTime = 0;
-            if (exportInProgress && mediaRecorder && mediaRecorder.state === 'recording') {
-                mediaRecorder.stop();
-            }
         });
 
         // Export functionality
@@ -358,6 +361,20 @@
                 return;
             }
 
+            exportInProgress = true;
+            exportBtn.disabled = true;
+            exportBtn.textContent = 'Экспорт...';
+
+            // Safety: force-re-enable after 60 seconds no matter what
+            const safetyTimer = setTimeout(() => {
+                if (exportInProgress) {
+                    exportInProgress = false;
+                    exportBtn.disabled = false;
+                    exportBtn.textContent = '💾 Экспорт MP4';
+                    alert('Экспорт занял слишком много времени. Попробуйте ещё раз');
+                }
+            }, 60000);
+
             let saveHandle = null;
             if ('showSaveFilePicker' in window) {
                 try {
@@ -367,6 +384,7 @@
                     });
                 } catch (err) {
                     if (err && err.name === 'AbortError') {
+                        clearTimeout(safetyTimer);
                         exportInProgress = false;
                         exportBtn.disabled = false;
                         exportBtn.textContent = '💾 Экспорт MP4';
@@ -376,32 +394,35 @@
                 }
             }
 
-            exportInProgress = true;
-            exportBtn.disabled = true;
-            exportBtn.textContent = 'Экспорт...';
-
             try {
-                if (videoElement.currentTime >= videoElement.duration) {
-                    videoElement.currentTime = 0;
-                }
-                if (!isPlaying) {
-                    await playVideo();
+                // 1. Reset to start
+                videoElement.pause();
+                isPlaying = false;
+                videoElement.currentTime = 0;
+                await new Promise(resolve => {
+                    if (videoElement.readyState >= 2) { resolve(); return; }
+                    videoElement.addEventListener('loadeddata', resolve, { once: true });
+                    setTimeout(resolve, 3000);
+                });
+                videoElement.currentTime = 0;
+                await new Promise(r => {
+                    if (videoElement.readyState >= 2) r();
+                    else videoElement.addEventListener('canplay', r, { once: true });
+                    setTimeout(r, 3000);
+                });
+
+                // 2. Draw the first frame manually so the canvas is not empty
+                if (videoElement.readyState >= 2) {
+                    ctx.drawImage(videoElement, 0, 0, videoCanvas.width, videoCanvas.height);
+                    if (Effects.active.length > 0) {
+                        Effects.apply(ctx, videoCanvas.width, videoCanvas.height, videoElement.currentTime);
+                    }
                 }
 
-                // Wait until the browser actually shows a video frame on the canvas;
-                // otherwise the recording (and the saved MP4) would be empty.
-                await waitForFirstFrame();
-                if (videoElement.ended) {
-                    videoElement.currentTime = 0;
-                    await playVideo();
-                    await waitForFirstFrame();
-                }
-
-                // Setup MediaRecorder to record webm
+                // 3. Setup MediaRecorder on the canvas stream at 30fps
                 recordedChunks = [];
-                const stream = videoCanvas.captureStream();
-                const options = { mimeType: 'video/webm;codecs=vp9' };
-                mediaRecorder = new MediaRecorder(stream, options);
+                const stream = videoCanvas.captureStream(30);
+                mediaRecorder = new MediaRecorder(stream, { mimeType: 'video/webm;codecs=vp9' });
 
                 mediaRecorder.ondataavailable = (e) => {
                     if (e.data.size > 0) {
@@ -437,68 +458,47 @@
                         savedSize = mp4Blob.size;
                     } catch (err) {
                         console.error('Export error:', err);
-alert('Ошибка экспорта: ' + ((err && err.message) || err));
+                        alert('Ошибка экспорта: ' + ((err && err.message) || err));
                     } finally {
+                        clearTimeout(safetyTimer);
                         exportInProgress = false;
                         exportBtn.disabled = false;
                         exportBtn.textContent = saved ? ('Сохранено ✅ ' + fmtBytes(savedSize)) : '💾 Экспорт MP4';
                         if (saved) {
-                            setTimeout(() => { if (!exportInProgress) exportBtn.textContent = '💾 Экспорт MP4'; }, 2500);
+                            setTimeout(() => { if (!exportInProgress) exportBtn.textContent = '💾 Экспорт MP4'; }, 3000);
+                        }
+                        if (!isPlaying || videoElement.ended) {
+                            isPlaying = false;
+                            cancelAnimationFrame(animationFrameId);
+                            playBtn.textContent = '▶️ Воспроизвести';
                         }
                     }
                 };
 
-                // Start recording (the canvas is already painting real frames)
+                // 4. Start recording
                 mediaRecorder.start();
 
-                // Stop recording after video duration
+                // 5. Play video so the canvas keeps receiving frames via animate()
+                isPlaying = true;
+                playBtn.textContent = '⏸️ Пауза';
+                animate();
+                await videoElement.play();
+
+                // 6. Stop after the full video duration (safety +1s buffer)
+                const dur = Math.max(videoElement.duration, 0.1);
                 setTimeout(() => {
-                    if (mediaRecorder.state === 'recording') {
+                    if (mediaRecorder && mediaRecorder.state === 'recording') {
                         mediaRecorder.stop();
                     }
-                }, videoElement.duration * 1000);
+                }, dur * 1000 + 1000);
             } catch (err) {
                 console.error('Export error:', err);
                 alert('Ошибка экспорта: ' + ((err && err.message) || err));
+                clearTimeout(safetyTimer);
                 exportInProgress = false;
                 exportBtn.disabled = false;
                 exportBtn.textContent = '💾 Экспорт MP4';
             }
-        }
-
-        function waitForFirstFrame() {
-            return new Promise((resolveTimeout) => {
-                const drawFrame = () => {
-                    if (videoElement.readyState >= 2) {
-                        ctx.drawImage(videoElement, 0, 0, videoCanvas.width, videoCanvas.height);
-                    }
-                };
-                if (videoElement.readyState >= 2 && videoElement.currentTime > 0 && !videoElement.ended) {
-                    drawFrame();
-                    resolveTimeout();
-                    return;
-                }
-                let done = false;
-                let check = null;
-                let timeoutId = null;
-                const finish = () => {
-                    if (done) return;
-                    done = true;
-                    if (check) clearInterval(check);
-                    if (timeoutId) clearTimeout(timeoutId);
-                    drawFrame();
-                    resolveTimeout();
-                };
-                if (typeof videoElement.requestVideoFrameCallback === 'function') {
-                    videoElement.requestVideoFrameCallback(finish);
-                }
-                check = setInterval(() => {
-                    if (videoElement.readyState >= 2 && videoElement.currentTime > 0 && !videoElement.ended) {
-                        finish();
-                    }
-                }, 200);
-                timeoutId = setTimeout(finish, 6000);
-            });
         }
 
         function fmtBytes(n) {
