@@ -365,15 +365,19 @@
             exportBtn.disabled = true;
             exportBtn.textContent = 'Экспорт...';
 
-            // Safety: force-re-enable after 60 seconds no matter what
+            // Safety: only if the export truly hangs, free the button again.
+            // Recording runs in real time, so the limit is video length + 3 min.
+            const maxExportMs = Math.min(videoElement.duration * 1000 + 180000, 900000);
             const safetyTimer = setTimeout(() => {
                 if (exportInProgress) {
                     exportInProgress = false;
                     exportBtn.disabled = false;
                     exportBtn.textContent = '💾 Экспорт MP4';
-                    alert('Экспорт занял слишком много времени. Попробуйте ещё раз');
                 }
-            }, 60000);
+                if (mediaRecorder && mediaRecorder.state === 'recording') {
+                    try { mediaRecorder.stop(); } catch (e) {}
+                }
+            }, maxExportMs);
 
             let saveHandle = null;
             if ('showSaveFilePicker' in window) {
