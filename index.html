@@ -1,0 +1,522 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Andrey V Studio — Видеоредактор</title>
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #121212;
+            color: #fff;
+            line-height: 1.6;
+        }
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        h1 {
+            text-align: center;
+            margin-bottom: 30px;
+            color: #00ff88;
+        }
+        #uploadSection {
+            background: #1e1e1e;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+        #videoUpload {
+            display: none;
+        }
+        .upload-label {
+            display: inline-block;
+            padding: 10px 20px;
+            background: linear-gradient(45deg, #00ff88, #00cc66);
+            color: #000;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: bold;
+            margin-top: 10px;
+        }
+        .upload-label:hover {
+            background: linear-gradient(45deg, #00e67a, #00b35c);
+        }
+        #videoContainer {
+            position: relative;
+            background: #000;
+            border-radius: 10px;
+            overflow: hidden;
+            margin-bottom: 20px;
+        }
+        #videoCanvas {
+            display: block;
+            width: 100%;
+            height: auto;
+        }
+        #videoElement {
+            display: none;
+        }
+        #controls {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 15px;
+            flex-wrap: wrap;
+            margin-bottom: 20px;
+        }
+        .control-btn {
+            background: #00ff88;
+            border: none;
+            color: #000;
+            padding: 10px 20px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: background 0.3s;
+        }
+        .control-btn:hover {
+            background: #00cc66;
+        }
+        .control-btn:active {
+            transform: scale(0.95);
+        }
+        .control-btn:disabled {
+            background: #555;
+            color: #aaa;
+            cursor: not-allowed;
+        }
+        .effect-chips {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            justify-content: center;
+        }
+        .effect-chip {
+            background: #2d2d2d;
+            border: 2px solid #444;
+            color: #fff;
+            padding: 8px 16px;
+            border-radius: 20px;
+            cursor: pointer;
+            transition: all 0.3s;
+            font-size: 0.9rem;
+        }
+        .effect-chip.active {
+            background: #00ff88;
+            color: #000;
+            border-color: #00ff88;
+            transform: scale(1.05);
+        }
+        #paramsPanel {
+            background: #1e1e1e;
+            padding: 20px;
+            border-radius: 10px;
+            margin-top: 20px;
+        }
+        .pg-title {
+            color: #00ff88;
+            margin-bottom: 10px;
+            font-size: 1.1rem;
+            border-bottom: 1px solid #333;
+            padding-bottom: 5px;
+        }
+        .row {
+            display: flex;
+            align-items: center;
+            margin-bottom: 15px;
+            gap: 10px;
+        }
+        .row span {
+            min-width: 100px;
+            color: #ccc;
+        }
+        input[type=range] {
+            flex: 1;
+            height: 4px;
+            background: #444;
+            border: none;
+            border-radius: 2px;
+            outline: none;
+        }
+        input[type=range]::-webkit-slider-thumb {
+            appearance: none;
+            width: 12px;
+            height: 12px;
+            background: #00ff88;
+            border-radius: 50%;
+            cursor: pointer;
+        }
+        input[type=color] {
+            width: 40px;
+            height: 30px;
+            border: none;
+            border-radius: 3px;
+            padding: 0;
+            cursor: pointer;
+        }
+        .val {
+            min-width: 40px;
+            text-align: center;
+            color: #00ff88;
+            font-weight: bold;
+        }
+        footer {
+            text-align: center;
+            margin-top: 30px;
+            color: #666;
+            font-size: 0.9rem;
+        }
+        @media (max-width: 600px) {
+            .container {
+                padding: 10px;
+            }
+            .control-btn {
+                padding: 8px 15px;
+                font-size: 0.9rem;
+            }
+            .effect-chip {
+                padding: 6px 12px;
+                font-size: 0.8rem;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Andrey V Studio — Видеоредактор</h1>
+        
+        <div id="uploadSection">
+            <input type="file" id="videoUpload" accept="video/*" style="display: none;">
+            <label for="videoUpload" class="upload-label">Выберите видео файл</label>
+        </div>
+        
+        <div id="videoContainer">
+            <canvas id="videoCanvas"></canvas>
+            <video id="videoElement" autoplay muted playsinline></video>
+        </div>
+        
+        <div id="controls">
+            <button id="playBtn" class="control-btn">▶️ Воспроизвести</button>
+            <button id="exportBtn" class="control-btn">💾 Экспорт MP4</button>
+            <div class="effect-chips" id="effectChips"></div>
+        </div>
+        
+        <div id="paramsPanel"></div>
+    </div>
+
+    <script src="effects.js"></script>
+    <script>
+        // DOM elements
+        const videoUpload = document.getElementById('videoUpload');
+        const videoElement = document.getElementById('videoElement');
+        const videoCanvas = document.getElementById('videoCanvas');
+        const ctx = videoCanvas.getContext('2d', { willReadFrequently: true });
+        const playBtn = document.getElementById('playBtn');
+        const exportBtn = document.getElementById('exportBtn');
+        const effectChips = document.getElementById('effectChips');
+        const paramsPanel = document.getElementById('paramsPanel');
+
+        // Initialize Effects module
+        Effects.init(videoCanvas); // Pass canvas element (though not used internally, we call it)
+
+        // State
+        let isPlaying = false;
+        let animationFrameId = null;
+        let mediaRecorder = null;
+        let recordedChunks = [];
+        let exportInProgress = false;
+
+        // Set canvas size to match video
+        function resizeCanvas() {
+            videoCanvas.width = videoElement.videoWidth || 640;
+            videoCanvas.height = videoElement.videoHeight || 360;
+        }
+
+        // Load video from file
+        videoUpload.addEventListener('change', (e) => {
+            console.log('File input changed', e.target.files);
+            const file = e.target.files[0];
+            if (!file) {
+                console.log('No file selected');
+                return;
+            }
+
+            const url = URL.createObjectURL(file);
+            console.log('Setting video src to', url);
+            videoElement.src = url;
+
+            // Handle errors
+            videoElement.onerror = () => {
+                alert('Ошибка загрузки видео. Пожалуйста, убедитесь, что файл является допустимым видеоформатом.');
+                videoElement.src = ''; // clear src
+            };
+
+            videoElement.load();
+
+            // Wait for metadata to get dimensions
+            videoElement.addEventListener('loadedmetadata', () => {
+                console.log('Loaded metadata', videoElement.videoWidth, videoElement.videoHeight);
+                resizeCanvas();
+                // Try to play video
+                playVideo().catch(err => {
+                    console.warn('Автозапуск видео блокируется', err);
+                    // If autoplay blocked, wait for user to click play button
+                    playBtn.textContent = '▶️ Воспроизвести';
+                    isPlaying = false;
+                });
+            }, { once: true });
+        });
+
+        // Play/pause toggle
+        playBtn.addEventListener('click', async () => {
+            if (isPlaying) {
+                pauseVideo();
+            } else {
+                await playVideo();
+            }
+        });
+
+        async function playVideo() {
+            try {
+                await videoElement.play();
+                isPlaying = true;
+                playBtn.textContent = '⏸️ Пауза';
+                animate();
+            } catch (err) {
+                console.error('Ошибка воспроизведения видео:', err);
+                throw err;
+            }
+        }
+
+        function pauseVideo() {
+            videoElement.pause();
+            isPlaying = false;
+            playBtn.textContent = '▶️ Воспроизвести';
+            cancelAnimationFrame(animationFrameId);
+        }
+
+        // Create effect chips
+        const effectIds = Object.keys(Effects.params);
+        effectIds.forEach(id => {
+            const chip = document.createElement('div');
+            chip.className = 'effect-chip';
+            chip.dataset.id = id;
+            chip.textContent = id.charAt(0).toUpperCase() + id.slice(1); // Capitalize first letter
+            chip.addEventListener('click', () => {
+                Effects.toggle(id);
+                chip.classList.toggle('active', Effects.active.includes(id));
+                Effects.updateUI(); // Rebuild parameter panel
+            });
+            effectChips.appendChild(chip);
+        });
+
+        // Animation loop
+        function animate() {
+            if (!isPlaying) return;
+
+            // Clear canvas
+            ctx.clearRect(0, 0, videoCanvas.width, videoCanvas.height);
+
+            // Draw current video frame to canvas frame from video element
+            if (videoElement.readyState >= 2) { // HAVE_CURRENT_DATA or more
+                ctx.drawImage(videoElement, 0, 0, videoCanvas.width, videoCanvas.height);
+
+                // Apply effects if any are active
+                if (Effects.active.length > 0) {
+                    Effects.apply(ctx, videoCanvas.width, videoCanvas.height, videoElement.currentTime);
+                }
+            }
+
+            // Request next frame
+            animationFrameId = requestAnimationFrame(animate);
+        }
+
+        // Handle video end
+        videoElement.addEventListener('ended', () => {
+            pauseVideo();
+            videoElement.currentTime = 0;
+            if (exportInProgress && mediaRecorder && mediaRecorder.state === 'recording') {
+                mediaRecorder.stop();
+            }
+        });
+
+        // Export functionality
+        exportBtn.addEventListener('click', startExport);
+
+        async function startExport() {
+            if (exportInProgress) return;
+            if (!videoElement.src) {
+                alert('Сначала загрузите видео');
+                return;
+            }
+
+            let saveHandle = null;
+            if ('showSaveFilePicker' in window) {
+                try {
+                    saveHandle = await window.showSaveFilePicker({
+                        suggestedName: 'edited_video.mp4',
+                        types: [{ description: 'MP4 видео', accept: { 'video/mp4': ['.mp4'] } }]
+                    });
+                } catch (err) {
+                    if (err && err.name === 'AbortError') {
+                        exportInProgress = false;
+                        exportBtn.disabled = false;
+                        exportBtn.textContent = '💾 Экспорт MP4';
+                        return;
+                    }
+                    console.warn('Окно сохранения недоступно, сохраняю автоматически.', err);
+                }
+            }
+
+            exportInProgress = true;
+            exportBtn.disabled = true;
+            exportBtn.textContent = 'Экспорт...';
+
+            try {
+                // 1. Capture canvas stream
+                const stream = videoCanvas.captureStream();
+
+                // 2. Setup MediaRecorder to record webm
+                recordedChunks = [];
+                const options = { mimeType: 'video/webm;codecs=vp9' };
+                mediaRecorder = new MediaRecorder(stream, options);
+
+                mediaRecorder.ondataavailable = (e) => {
+                    if (e.data.size > 0) {
+                        recordedChunks.push(e.data);
+                    }
+                };
+
+                mediaRecorder.onstop = async () => {
+                    try {
+                        const webmBlob = new Blob(recordedChunks, { type: 'video/webm' });
+                        if (!webmBlob.size) {
+                            throw new Error('Запись видео не удалась: не получено кадров');
+                        }
+                        const mp4Blob = await convertWebmToMp4(webmBlob);
+                        if (saveHandle) {
+                            try {
+                                const writable = await saveHandle.createWritable();
+                                await writable.write(mp4Blob);
+                                await writable.close();
+                            } catch (err) {
+                                console.error('Сохранение в файл не удалось:', err);
+                                downloadBlob(mp4Blob, 'edited_video.mp4');
+                            }
+                        } else {
+                            downloadBlob(mp4Blob, 'edited_video.mp4');
+                        }
+                    } catch (err) {
+                        console.error('Export error:', err);
+alert('Ошибка экспорта: ' + ((err && err.message) || err));
+                    } finally {
+                        exportInProgress = false;
+                        exportBtn.disabled = false;
+                        exportBtn.textContent = '💾 Экспорт MP4';
+                    }
+                };
+
+                // Start recording
+                mediaRecorder.start();
+
+                // Play video if not already playing (ensures we capture frames)
+                if (!isPlaying) {
+                    await playVideo();
+                }
+
+                // Stop recording after video duration
+                setTimeout(() => {
+                    if (mediaRecorder.state === 'recording') {
+                        mediaRecorder.stop();
+                    }
+                }, videoElement.duration * 1000);
+            } catch (err) {
+                console.error('Export error:', err);
+                alert('Ошибка экспорта: ' + ((err && err.message) || err));
+                exportInProgress = false;
+                exportBtn.disabled = false;
+                exportBtn.textContent = '💾 Экспорт MP4';
+            }
+        }
+
+        function friendlyFsError(err) {
+            if (String((err && err.message) || err).includes('FS error')) {
+                return new Error('Ошибка чтения записи конвертером. Попробуйте экспорт ещё раз');
+            }
+            return err;
+        }
+
+        async function convertWebmToMp4MainThread(webmBlob) {
+            try {
+                const coreURL = 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/esm/ffmpeg-core.js';
+                const wasmURL = 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/esm/ffmpeg-core.wasm';
+                const mod = await import(coreURL);
+                const ffmpeg = await mod.default({
+                    mainScriptUrlOrBlob: coreURL + '#' + btoa(JSON.stringify({ wasmURL: wasmURL }))
+                });
+                await new Promise(resolve => setTimeout(resolve, 30));
+                ffmpeg.FS.writeFile('input.webm', new Uint8Array(await webmBlob.arrayBuffer()));
+                ffmpeg.exec.apply(null, ['-y', '-i', 'input.webm', '-c:v', 'libx264', '-crf', '23', '-pix_fmt', 'yuv420p', 'output.mp4']);
+                const data = ffmpeg.FS.readFile('output.mp4');
+                ffmpeg.FS.unlink('input.webm');
+                ffmpeg.FS.unlink('output.mp4');
+                return new Blob([data.buffer], { type: 'video/mp4' });
+            } catch (err) {
+                throw friendlyFsError(err);
+            }
+        }
+
+        async function convertWebmToMp4Worker(webmBlob) {
+            try {
+                const { FFmpeg } = await import('https://cdn.jsdelivr.net/npm/@ffmpeg/ffmpeg@0.12.10/+esm');
+                const ffmpeg = new FFmpeg();
+                const workerURL = new URL('vendor/ffmpeg/worker.js', document.baseURI).href;
+                await ffmpeg.load({
+                    classWorkerURL: workerURL,
+                    coreURL: 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/esm/ffmpeg-core.js',
+                    wasmURL: 'https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.10/dist/esm/ffmpeg-core.wasm'
+                });
+                ffmpeg.on('progress', ({ progress }) => console.log(`FFmpeg: ${(progress * 100).toFixed(1)}%`));
+                await ffmpeg.writeFile('input.webm', new Uint8Array(await webmBlob.arrayBuffer()));
+                await ffmpeg.exec(['-i', 'input.webm', '-c:v', 'libx264', '-crf', '23', '-pix_fmt', 'yuv420p', 'output.mp4']);
+                const data = await ffmpeg.readFile('output.mp4');
+                const mp4Blob = new Blob([data.buffer], { type: 'video/mp4' });
+                await ffmpeg.deleteFile('input.webm');
+                await ffmpeg.deleteFile('output.mp4');
+                return mp4Blob;
+            } catch (err) {
+                throw friendlyFsError(err);
+            }
+        }
+
+        async function convertWebmToMp4(webmBlob) {
+            return location.protocol === 'file:'
+                ? convertWebmToMp4MainThread(webmBlob)
+                : convertWebmToMp4Worker(webmBlob);
+        }
+
+        // Helper to download blob
+        function downloadBlob(blob, filename) {
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+
+        // Handle window resize
+        window.addEventListener('resize', resizeCanvas);
+    </script>
+</body>
+</html>
