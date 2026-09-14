@@ -206,6 +206,7 @@
         <div id="controls">
             <button id="playBtn" class="control-btn">▶️ Воспроизвести</button>
             <button id="exportBtn" class="control-btn">💾 Экспорт MP4</button>
+            <button id="resetBtn" class="control-btn" title="Очистить редактор и начать заново">🔄 Новое видео</button>
             <div class="effect-chips" id="effectChips"></div>
         </div>
         
@@ -221,6 +222,7 @@
         const ctx = videoCanvas.getContext('2d', { willReadFrequently: true });
         const playBtn = document.getElementById('playBtn');
         const exportBtn = document.getElementById('exportBtn');
+        const resetBtn = document.getElementById('resetBtn');
         const effectChips = document.getElementById('effectChips');
         const paramsPanel = document.getElementById('paramsPanel');
 
@@ -590,6 +592,14 @@
         }
 
         // Handle window resize
+        // Reset / start over — clears video and effects (like a page refresh)
+        resetBtn.addEventListener('click', () => {
+            if (exportInProgress) return;
+            const url = new URL(location.href);
+            url.searchParams.set('v', String(Date.now()));
+            location.href = url.href;
+        });
+
         window.addEventListener('resize', resizeCanvas);
     </script>
 </body>
