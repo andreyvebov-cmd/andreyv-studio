@@ -381,11 +381,25 @@
             exportBtn.textContent = 'Экспорт...';
 
             try {
-                // 1. Capture canvas stream
-                const stream = videoCanvas.captureStream();
+                if (videoElement.currentTime >= videoElement.duration) {
+                    videoElement.currentTime = 0;
+                }
+                if (!isPlaying) {
+                    await playVideo();
+                }
 
-                // 2. Setup MediaRecorder to record webm
+                // Wait until the browser actually shows a video frame on the canvas;
+                // otherwise the recording (and the saved MP4) would be empty.
+                await waitForFirstFrame();
+                if (videoElement.ended) {
+                    videoElement.currentTime = 0;
+                    await playVideo();
+                    await waitForFirstFrame();
+                }
+
+                // Setup MediaRecorder to record webm
                 recordedChunks = [];
+                const stream = videoCanvas.captureStream();
                 const options = { mimeType: 'video/webm;codecs=vp9' };
                 mediaRecorder = new MediaRecorder(stream, options);
 
@@ -397,13 +411,14 @@
 
                 mediaRecorder.onstop = async () => {
                     let saved = false;
+                    let savedSize = 0;
                     try {
                         const webmBlob = new Blob(recordedChunks, { type: 'video/webm' });
                         if (!webmBlob.size) {
                             throw new Error('Запись видео не удалась: не получено кадров');
                         }
                         const mp4Blob = await convertWebmToMp4(webmBlob);
-                        if (mp4Blob.size < 500) {
+                        if (mp4Blob.size < 1024) {
                             throw new Error('Результат конвертации пустой. Попробуйте экспорт ещё раз');
                         }
                         if (saveHandle) {
@@ -419,26 +434,22 @@
                             downloadBlob(mp4Blob, 'edited_video.mp4');
                         }
                         saved = true;
+                        savedSize = mp4Blob.size;
                     } catch (err) {
                         console.error('Export error:', err);
 alert('Ошибка экспорта: ' + ((err && err.message) || err));
                     } finally {
                         exportInProgress = false;
                         exportBtn.disabled = false;
-                        exportBtn.textContent = saved ? 'Сохранено ✅' : '💾 Экспорт MP4';
+                        exportBtn.textContent = saved ? ('Сохранено ✅ ' + fmtBytes(savedSize)) : '💾 Экспорт MP4';
                         if (saved) {
                             setTimeout(() => { if (!exportInProgress) exportBtn.textContent = '💾 Экспорт MP4'; }, 2500);
                         }
                     }
                 };
 
-                // Start recording
+                // Start recording (the canvas is already painting real frames)
                 mediaRecorder.start();
-
-                // Play video if not already playing (ensures we capture frames)
-                if (!isPlaying) {
-                    await playVideo();
-                }
 
                 // Stop recording after video duration
                 setTimeout(() => {
@@ -453,6 +464,47 @@ alert('Ошибка экспорта: ' + ((err && err.message) || err));
                 exportBtn.disabled = false;
                 exportBtn.textContent = '💾 Экспорт MP4';
             }
+        }
+
+        function waitForFirstFrame() {
+            return new Promise((resolveTimeout) => {
+                const drawFrame = () => {
+                    if (videoElement.readyState >= 2) {
+                        ctx.drawImage(videoElement, 0, 0, videoCanvas.width, videoCanvas.height);
+                    }
+                };
+                if (videoElement.readyState >= 2 && videoElement.currentTime > 0 && !videoElement.ended) {
+                    drawFrame();
+                    resolveTimeout();
+                    return;
+                }
+                let done = false;
+                let check = null;
+                let timeoutId = null;
+                const finish = () => {
+                    if (done) return;
+                    done = true;
+                    if (check) clearInterval(check);
+                    if (timeoutId) clearTimeout(timeoutId);
+                    drawFrame();
+                    resolveTimeout();
+                };
+                if (typeof videoElement.requestVideoFrameCallback === 'function') {
+                    videoElement.requestVideoFrameCallback(finish);
+                }
+                check = setInterval(() => {
+                    if (videoElement.readyState >= 2 && videoElement.currentTime > 0 && !videoElement.ended) {
+                        finish();
+                    }
+                }, 200);
+                timeoutId = setTimeout(finish, 6000);
+            });
+        }
+
+        function fmtBytes(n) {
+            if (n >= 1048576) return (n / 1048576).toFixed(1) + ' МБ';
+            if (n >= 1024) return (n / 1024).toFixed(0) + ' КБ';
+            return n + ' Б';
         }
 
         function friendlyFsError(err) {
@@ -473,6 +525,11 @@ alert('Ошибка экспорта: ' + ((err && err.message) || err));
                 await new Promise(resolve => setTimeout(resolve, 30));
                 ffmpeg.FS.writeFile('input.webm', new Uint8Array(await webmBlob.arrayBuffer()));
                 ffmpeg.exec.apply(null, ['-y', '-i', 'input.webm', '-c:v', 'libx264', '-crf', '23', '-pix_fmt', 'yuv420p', 'output.mp4']);
+                try {
+                    ffmpeg.exec.apply(null, ['-i', 'output.mp4', '-map', '0:v:0', '-frames:v', '1', '-f', 'null', '-']);
+                } catch (e) {
+                    throw new Error('В выходном видео нет кадров. Попробуйте экспорт ещё раз');
+                }
                 const data = ffmpeg.FS.readFile('output.mp4');
                 ffmpeg.FS.unlink('input.webm');
                 ffmpeg.FS.unlink('output.mp4');
@@ -495,6 +552,11 @@ alert('Ошибка экспорта: ' + ((err && err.message) || err));
                 ffmpeg.on('progress', ({ progress }) => console.log(`FFmpeg: ${(progress * 100).toFixed(1)}%`));
                 await ffmpeg.writeFile('input.webm', new Uint8Array(await webmBlob.arrayBuffer()));
                 await ffmpeg.exec(['-i', 'input.webm', '-c:v', 'libx264', '-crf', '23', '-pix_fmt', 'yuv420p', 'output.mp4']);
+                try {
+                    await ffmpeg.exec(['-i', 'output.mp4', '-map', '0:v:0', '-frames:v', '1', '-f', 'null', '-']);
+                } catch (e) {
+                    throw new Error('В выходном видео нет кадров. Попробуйте экспорт ещё раз');
+                }
                 const data = await ffmpeg.readFile('output.mp4');
                 const mp4Blob = new Blob([data.buffer], { type: 'video/mp4' });
                 await ffmpeg.deleteFile('input.webm');
