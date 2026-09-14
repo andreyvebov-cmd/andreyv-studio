@@ -396,16 +396,20 @@
                 };
 
                 mediaRecorder.onstop = async () => {
+                    let saved = false;
                     try {
                         const webmBlob = new Blob(recordedChunks, { type: 'video/webm' });
                         if (!webmBlob.size) {
                             throw new Error('Запись видео не удалась: не получено кадров');
                         }
                         const mp4Blob = await convertWebmToMp4(webmBlob);
+                        if (mp4Blob.size < 500) {
+                            throw new Error('Результат конвертации пустой. Попробуйте экспорт ещё раз');
+                        }
                         if (saveHandle) {
                             try {
                                 const writable = await saveHandle.createWritable();
-                                await writable.write(mp4Blob);
+                                await writable.write(new Uint8Array(await mp4Blob.arrayBuffer()));
                                 await writable.close();
                             } catch (err) {
                                 console.error('Сохранение в файл не удалось:', err);
@@ -414,13 +418,17 @@
                         } else {
                             downloadBlob(mp4Blob, 'edited_video.mp4');
                         }
+                        saved = true;
                     } catch (err) {
                         console.error('Export error:', err);
 alert('Ошибка экспорта: ' + ((err && err.message) || err));
                     } finally {
                         exportInProgress = false;
                         exportBtn.disabled = false;
-                        exportBtn.textContent = '💾 Экспорт MP4';
+                        exportBtn.textContent = saved ? 'Сохранено ✅' : '💾 Экспорт MP4';
+                        if (saved) {
+                            setTimeout(() => { if (!exportInProgress) exportBtn.textContent = '💾 Экспорт MP4'; }, 2500);
+                        }
                     }
                 };
 
@@ -512,7 +520,7 @@ alert('Ошибка экспорта: ' + ((err && err.message) || err));
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);
-            URL.revokeObjectURL(url);
+            setTimeout(() => URL.revokeObjectURL(url), 2000);
         }
 
         // Handle window resize
